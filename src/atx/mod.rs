@@ -7,14 +7,15 @@
 //!
 //! - Power button control (short press for on/graceful shutdown, long press for force off)
 //! - Reset button control
-//! - Power status monitoring via LED sensing (GPIO only)
-//! - Independent hardware binding for each action (GPIO or USB relay)
+//! - Power status monitoring via LED sensing or MiIoT property query
+//! - Independent hardware binding for each action (GPIO, USB relay, or MiIoT)
 //! - Hot-reload configuration support
 //!
 //! # Hardware Support
 //!
 //! - **GPIO**: Uses Linux GPIO character device (/dev/gpiochipX) for direct hardware control
 //! - **USB Relay**: Uses HID USB relay modules for isolated switching
+//! - **MiIoT**: Uses MiIoT smart plug devices via mijiaAPI CLI tool
 //!
 //! # Example
 //!
@@ -28,14 +29,16 @@
 //!         device: "/dev/gpiochip0".to_string(),
 //!         pin: 5,
 //!         active_level: ActiveLevel::High,
+//!         ..Default::default()
 //!     },
 //!     reset: AtxKeyConfig {
 //!         driver: AtxDriverType::UsbRelay,
 //!         device: "/dev/hidraw0".to_string(),
 //!         pin: 0,
 //!         active_level: ActiveLevel::High,
+//!         ..Default::default()
 //!     },
-//!     led: Default::default(),
+//!     ..Default::default()
 //! };
 //!
 //! let controller = AtxController::new(config);
@@ -46,14 +49,15 @@
 mod controller;
 mod executor;
 mod led;
+pub(crate) mod miot;
 mod types;
 mod wol;
 
 pub use controller::{AtxController, AtxControllerConfig};
 pub use executor::timing;
 pub use types::{
-    ActiveLevel, AtxAction, AtxDevices, AtxDriverType, AtxKeyConfig, AtxLedConfig, AtxPowerRequest,
-    AtxState, PowerStatus,
+    ActiveLevel, AtxAction, AtxDevices, AtxDriverType, AtxKeyConfig, AtxStatusConfig,
+    AtxStatusDriverType, AtxPowerRequest, AtxState, MiotConfig, PowerStatus,
 };
 pub use wol::send_wol;
 
@@ -100,7 +104,9 @@ mod tests {
         let _: AtxDriverType = AtxDriverType::None;
         let _: ActiveLevel = ActiveLevel::High;
         let _: AtxKeyConfig = AtxKeyConfig::default();
-        let _: AtxLedConfig = AtxLedConfig::default();
+        let _: AtxStatusConfig = AtxStatusConfig::default();
+        let _: AtxStatusDriverType = AtxStatusDriverType::None;
+        let _: MiotConfig = MiotConfig::default();
         let _: AtxState = AtxState::default();
         let _: AtxDevices = AtxDevices::default();
     }

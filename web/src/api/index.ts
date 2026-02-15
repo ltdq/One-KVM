@@ -306,7 +306,7 @@ export const atxApi = {
       backend: string
       initialized: boolean
       power_status: 'on' | 'off' | 'unknown'
-      led_supported: boolean
+      status_supported: boolean
     }>('/atx/status'),
 
   power: (action: 'short' | 'long' | 'reset') =>

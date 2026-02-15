@@ -364,10 +364,24 @@ pub async fn apply_msd_config(
 /// 应用 ATX 配置变更
 pub async fn apply_atx_config(
     state: &Arc<AppState>,
-    _old_config: &AtxConfig,
+    old_config: &AtxConfig,
     new_config: &AtxConfig,
 ) -> Result<()> {
     tracing::info!("Applying ATX config changes...");
+
+    // If auth_path changed, execute mijiaAPI -p <path> before reload
+    if new_config.miot.auth_path != old_config.miot.auth_path && !new_config.miot.auth_path.is_empty() {
+        let command = if new_config.miot.command.is_empty() {
+            "mijiaAPI".to_string()
+        } else {
+            new_config.miot.command.clone()
+        };
+        tracing::info!("MiIoT auth_path changed, running {} -p {}", command, new_config.miot.auth_path);
+        match run_miot_set_auth(&command, &new_config.miot.auth_path).await {
+            Ok(_) => tracing::info!("MiIoT auth path set successfully"),
+            Err(e) => tracing::warn!("Failed to set MiIoT auth path: {}", e),
+        }
+    }
 
     // Convert AtxConfig to AtxControllerConfig
     let controller_config = new_config.to_controller_config();
@@ -530,6 +544,40 @@ pub async fn apply_rustdesk_config(
                 tracing::info!("RustDesk credentials saved successfully");
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Run `mijiaAPI -p <path>` to set auth file path
+async fn run_miot_set_auth(command: &str, path: &str) -> Result<()> {
+    use std::process::Stdio;
+    use tokio::process::Command;
+
+    let child = Command::new(command)
+        .args(["-p", path])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            AppError::Internal(format!("Failed to spawn '{}': {}", command, e))
+        })?;
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+        .await
+        .map_err(|_| AppError::Internal("mijiaAPI -p timed out".to_string()))?
+        .map_err(|e| AppError::Internal(format!("mijiaAPI -p wait failed: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Internal(format!(
+            "mijiaAPI -p '{}' failed (exit {}): {}",
+            path,
+            output.status.code().unwrap_or(-1),
+            stderr.trim()
+        )));
     }
 
     Ok(())

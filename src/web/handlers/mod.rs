@@ -2584,7 +2584,7 @@ pub struct AtxStateResponse {
     pub backend: String,
     pub initialized: bool,
     pub power_status: String,
-    pub led_supported: bool,
+    pub status_supported: bool,
 }
 
 impl From<AtxState> for AtxStateResponse {
@@ -2606,7 +2606,7 @@ impl From<AtxState> for AtxStateResponse {
                 PowerStatus::Off => "off".to_string(),
                 PowerStatus::Unknown => "unknown".to_string(),
             },
-            led_supported: state.led_supported,
+            status_supported: state.status_supported,
         }
     }
 }
@@ -2625,7 +2625,7 @@ pub async fn atx_status(State(state): State<Arc<AppState>>) -> Result<Json<AtxSt
             backend: "none".to_string(),
             initialized: false,
             power_status: "unknown".to_string(),
-            led_supported: false,
+            status_supported: false,
         })),
     }
 }
@@ -2644,7 +2644,9 @@ pub async fn atx_power(
     let atx_guard = state.atx.read().await;
     let atx = atx_guard
         .as_ref()
-        .ok_or_else(|| AppError::Internal("ATX controller not initialized".to_string()))?;
+        .ok_or_else(|| {
+            AppError::Internal("ATX controller not initialized".to_string())
+        })?;
 
     match req.action.as_str() {
         "short" => {

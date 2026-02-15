@@ -22,6 +22,7 @@ import type {
   ExtensionsStatus,
   ExtensionStatus,
   AtxDriverType,
+  AtxStatusDriverType,
   ActiveLevel,
   AtxDevices,
   OtgHidProfile,
@@ -108,6 +109,7 @@ const navGroups = computed(() => [
       { id: 'ext-rustdesk', label: t('extensions.rustdesk.title'), icon: ScreenShare },
       { id: 'ext-remote-access', label: t('extensions.remoteAccess.title'), icon: ExternalLink },
       { id: 'ext-ttyd', label: t('extensions.ttyd.title'), icon: Terminal },
+      { id: 'ext-miot', label: t('settings.atxMiot'), icon: Power },
     ]
   },
   {
@@ -350,18 +352,34 @@ const atxConfig = ref({
     device: '',
     pin: 0,
     active_level: 'high' as ActiveLevel,
+    prop: '',
+    value: '',
+    off_prop: '',
+    off_value: '',
   },
   reset: {
     driver: 'none' as AtxDriverType,
     device: '',
     pin: 0,
     active_level: 'high' as ActiveLevel,
+    prop: '',
+    value: '',
+    off_prop: '',
+    off_value: '',
   },
-  led: {
-    enabled: false,
+  status: {
+    driver: 'none' as AtxStatusDriverType,
     gpio_chip: '',
     gpio_pin: 0,
     inverted: false,
+    prop: '',
+    on_value: '',
+    off_value: '',
+  },
+  miot: {
+    did: '',
+    command: 'mijiaAPI',
+    auth_path: '',
   },
   wol_interface: '',
 })
@@ -901,7 +919,8 @@ async function loadAtxConfig() {
       enabled: config.enabled,
       power: { ...config.power },
       reset: { ...config.reset },
-      led: { ...config.led },
+      status: config.status ? { ...config.status } : { driver: 'none' as AtxStatusDriverType, gpio_chip: '', gpio_pin: 0, inverted: false, prop: '', on_value: '', off_value: '' },
+      miot: config.miot ? { ...config.miot } : { did: '', command: 'mijiaAPI', auth_path: '' },
       wol_interface: config.wol_interface || '',
     }
   } catch (e) {
@@ -928,18 +947,32 @@ async function saveAtxConfig() {
         device: atxConfig.value.power.device || undefined,
         pin: atxConfig.value.power.pin,
         active_level: atxConfig.value.power.active_level,
+        prop: atxConfig.value.power.prop || undefined,
+        value: atxConfig.value.power.value || undefined,
+        off_prop: atxConfig.value.power.off_prop || undefined,
+        off_value: atxConfig.value.power.off_value || undefined,
       },
       reset: {
         driver: atxConfig.value.reset.driver,
         device: atxConfig.value.reset.device || undefined,
         pin: atxConfig.value.reset.pin,
         active_level: atxConfig.value.reset.active_level,
+        prop: atxConfig.value.reset.prop || undefined,
+        value: atxConfig.value.reset.value || undefined,
       },
-      led: {
-        enabled: atxConfig.value.led.enabled,
-        gpio_chip: atxConfig.value.led.gpio_chip || undefined,
-        gpio_pin: atxConfig.value.led.gpio_pin,
-        inverted: atxConfig.value.led.inverted,
+      status: {
+        driver: atxConfig.value.status.driver,
+        gpio_chip: atxConfig.value.status.gpio_chip || undefined,
+        gpio_pin: atxConfig.value.status.gpio_pin,
+        inverted: atxConfig.value.status.inverted,
+        prop: atxConfig.value.status.prop || undefined,
+        on_value: atxConfig.value.status.on_value || undefined,
+        off_value: atxConfig.value.status.off_value || undefined,
+      },
+      miot: {
+        did: atxConfig.value.miot.did || undefined,
+        command: atxConfig.value.miot.command || undefined,
+        auth_path: atxConfig.value.miot.auth_path || undefined,
       },
       wol_interface: atxConfig.value.wol_interface || undefined,
     })
@@ -1906,20 +1939,21 @@ onMounted(async () => {
                       <option value="none">{{ t('settings.atxDriverNone') }}</option>
                       <option value="gpio">{{ t('settings.atxDriverGpio') }}</option>
                       <option value="usbrelay">{{ t('settings.atxDriverUsbRelay') }}</option>
+                      <option value="miot">{{ t('settings.atxDriverMiot') }}</option>
                     </select>
                   </div>
-                  <div class="space-y-2">
+                  <div v-if="atxConfig.power.driver !== 'none' && atxConfig.power.driver !== 'miot'" class="space-y-2">
                     <Label for="power-device">{{ t('settings.atxDevice') }}</Label>
-                    <select id="power-device" v-model="atxConfig.power.device" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm" :disabled="atxConfig.power.driver === 'none'">
+                    <select id="power-device" v-model="atxConfig.power.device" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
                       <option value="">{{ t('settings.selectDevice') }}</option>
                       <option v-for="dev in getAtxDevicesForDriver(atxConfig.power.driver)" :key="dev" :value="dev">{{ dev }}</option>
                     </select>
                   </div>
                 </div>
-                <div class="grid gap-4 sm:grid-cols-2">
+                <div v-if="atxConfig.power.driver !== 'none' && atxConfig.power.driver !== 'miot'" class="grid gap-4 sm:grid-cols-2">
                   <div class="space-y-2">
                     <Label for="power-pin">{{ atxConfig.power.driver === 'usbrelay' ? t('settings.atxChannel') : t('settings.atxPin') }}</Label>
-                    <Input id="power-pin" type="number" v-model.number="atxConfig.power.pin" min="0" :disabled="atxConfig.power.driver === 'none'" />
+                    <Input id="power-pin" type="number" v-model.number="atxConfig.power.pin" min="0" />
                   </div>
                   <div v-if="atxConfig.power.driver === 'gpio'" class="space-y-2">
                     <Label for="power-level">{{ t('settings.atxActiveLevel') }}</Label>
@@ -1927,6 +1961,30 @@ onMounted(async () => {
                       <option value="high">{{ t('settings.atxLevelHigh') }}</option>
                       <option value="low">{{ t('settings.atxLevelLow') }}</option>
                     </select>
+                  </div>
+                </div>
+                <div v-if="atxConfig.power.driver === 'miot'" class="grid gap-4 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label for="power-prop">{{ t('settings.atxMiotProp') }}</Label>
+                    <Input id="power-prop" v-model="atxConfig.power.prop" :placeholder="t('settings.atxMiotPropPlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotPropHint') }}</p>
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="power-value">{{ t('settings.atxMiotValue') }}</Label>
+                    <Input id="power-value" v-model="atxConfig.power.value" :placeholder="t('settings.atxMiotValuePlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotValueHint') }}</p>
+                  </div>
+                </div>
+                <div v-if="atxConfig.power.driver === 'miot'" class="grid gap-4 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label for="power-off-prop">{{ t('settings.atxMiotOffProp') }}</Label>
+                    <Input id="power-off-prop" v-model="atxConfig.power.off_prop" :placeholder="t('settings.atxMiotOffPropPlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotOffPropHint') }}</p>
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="power-off-value">{{ t('settings.atxMiotOffValue') }}</Label>
+                    <Input id="power-off-value" v-model="atxConfig.power.off_value" :placeholder="t('settings.atxMiotOffValuePlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotOffValueHint') }}</p>
                   </div>
                 </div>
               </CardContent>
@@ -1946,20 +2004,21 @@ onMounted(async () => {
                       <option value="none">{{ t('settings.atxDriverNone') }}</option>
                       <option value="gpio">{{ t('settings.atxDriverGpio') }}</option>
                       <option value="usbrelay">{{ t('settings.atxDriverUsbRelay') }}</option>
+                      <option value="miot">{{ t('settings.atxDriverMiot') }}</option>
                     </select>
                   </div>
-                  <div class="space-y-2">
+                  <div v-if="atxConfig.reset.driver !== 'none' && atxConfig.reset.driver !== 'miot'" class="space-y-2">
                     <Label for="reset-device">{{ t('settings.atxDevice') }}</Label>
-                    <select id="reset-device" v-model="atxConfig.reset.device" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm" :disabled="atxConfig.reset.driver === 'none'">
+                    <select id="reset-device" v-model="atxConfig.reset.device" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
                       <option value="">{{ t('settings.selectDevice') }}</option>
                       <option v-for="dev in getAtxDevicesForDriver(atxConfig.reset.driver)" :key="dev" :value="dev">{{ dev }}</option>
                     </select>
                   </div>
                 </div>
-                <div class="grid gap-4 sm:grid-cols-2">
+                <div v-if="atxConfig.reset.driver !== 'none' && atxConfig.reset.driver !== 'miot'" class="grid gap-4 sm:grid-cols-2">
                   <div class="space-y-2">
                     <Label for="reset-pin">{{ atxConfig.reset.driver === 'usbrelay' ? t('settings.atxChannel') : t('settings.atxPin') }}</Label>
-                    <Input id="reset-pin" type="number" v-model.number="atxConfig.reset.pin" min="0" :disabled="atxConfig.reset.driver === 'none'" />
+                    <Input id="reset-pin" type="number" v-model.number="atxConfig.reset.pin" min="0" />
                   </div>
                   <div v-if="atxConfig.reset.driver === 'gpio'" class="space-y-2">
                     <Label for="reset-level">{{ t('settings.atxActiveLevel') }}</Label>
@@ -1969,39 +2028,51 @@ onMounted(async () => {
                     </select>
                   </div>
                 </div>
+                <div v-if="atxConfig.reset.driver === 'miot'" class="grid gap-4 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label for="reset-prop">{{ t('settings.atxMiotProp') }}</Label>
+                    <Input id="reset-prop" v-model="atxConfig.reset.prop" :placeholder="t('settings.atxMiotPropPlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotPropHint') }}</p>
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="reset-value">{{ t('settings.atxMiotValue') }}</Label>
+                    <Input id="reset-value" v-model="atxConfig.reset.value" :placeholder="t('settings.atxMiotValuePlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotValueHint') }}</p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
-            <!-- LED Sensing Config -->
+            <!-- Status Detection Config -->
             <Card v-if="atxConfig.enabled">
               <CardHeader>
                 <CardTitle>{{ t('settings.atxLedSensing') }}</CardTitle>
                 <CardDescription>{{ t('settings.atxLedSensingDesc') }}</CardDescription>
               </CardHeader>
               <CardContent class="space-y-4">
-                <div class="flex items-center justify-between">
-                  <div class="space-y-0.5">
-                    <Label for="led-enabled">{{ t('settings.atxLedEnable') }}</Label>
-                    <p class="text-xs text-muted-foreground">{{ t('settings.atxLedEnableDesc') }}</p>
-                  </div>
-                  <Switch
-                    id="led-enabled"
-                    v-model="atxConfig.led.enabled"
-                  />
+                <div class="space-y-2">
+                  <Label for="status-driver">{{ t('settings.atxLedEnable') }}</Label>
+                  <p class="text-xs text-muted-foreground">{{ t('settings.atxLedEnableDesc') }}</p>
+                  <select id="status-driver" v-model="atxConfig.status.driver" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
+                    <option value="none">{{ t('settings.atxStatusDriverNone') }}</option>
+                    <option value="led">{{ t('settings.atxStatusDriverLed') }}</option>
+                    <option value="miot">{{ t('settings.atxStatusDriverMiot') }}</option>
+                  </select>
                 </div>
-                <template v-if="atxConfig.led.enabled">
+                <!-- LED GPIO options -->
+                <template v-if="atxConfig.status.driver === 'led'">
                   <Separator />
                   <div class="grid gap-4 sm:grid-cols-2">
                     <div class="space-y-2">
                       <Label for="led-chip">{{ t('settings.atxLedChip') }}</Label>
-                      <select id="led-chip" v-model="atxConfig.led.gpio_chip" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
+                      <select id="led-chip" v-model="atxConfig.status.gpio_chip" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
                         <option value="">{{ t('settings.selectDevice') }}</option>
                         <option v-for="dev in atxDevices.gpio_chips" :key="dev" :value="dev">{{ dev }}</option>
                       </select>
                     </div>
                     <div class="space-y-2">
                       <Label for="led-pin">{{ t('settings.atxLedPin') }}</Label>
-                      <Input id="led-pin" type="number" v-model.number="atxConfig.led.gpio_pin" min="0" />
+                      <Input id="led-pin" type="number" v-model.number="atxConfig.status.gpio_pin" min="0" />
                     </div>
                   </div>
                   <div class="flex items-center justify-between">
@@ -2011,8 +2082,29 @@ onMounted(async () => {
                     </div>
                     <Switch
                       id="led-inverted"
-                      v-model="atxConfig.led.inverted"
+                      v-model="atxConfig.status.inverted"
                     />
+                  </div>
+                </template>
+                <!-- MiIoT status options -->
+                <template v-if="atxConfig.status.driver === 'miot'">
+                  <Separator />
+                  <div class="space-y-2">
+                    <Label for="status-prop">{{ t('settings.atxMiotStatusProp') }}</Label>
+                    <Input id="status-prop" v-model="atxConfig.status.prop" :placeholder="t('settings.atxMiotStatusPropPlaceholder')" />
+                    <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotStatusPropHint') }}</p>
+                  </div>
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="space-y-2">
+                      <Label for="status-on-value">{{ t('settings.atxMiotStatusOnValue') }}</Label>
+                      <Input id="status-on-value" v-model="atxConfig.status.on_value" :placeholder="t('settings.atxMiotStatusOnValuePlaceholder')" />
+                      <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotStatusOnValueHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label for="status-off-value">{{ t('settings.atxMiotStatusOffValue') }}</Label>
+                      <Input id="status-off-value" v-model="atxConfig.status.off_value" :placeholder="t('settings.atxMiotStatusOffValuePlaceholder')" />
+                      <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotStatusOffValueHint') }}</p>
+                    </div>
                   </div>
                 </template>
               </CardContent>
@@ -2338,6 +2430,51 @@ onMounted(async () => {
             <!-- Save button -->
             <div v-if="extensions?.easytier?.available" class="flex justify-end">
               <Button :disabled="loading || isExtRunning(extensions?.easytier?.status)" @click="saveExtensionConfig('easytier')">
+                <Check v-if="saved" class="h-4 w-4 mr-2" /><Save v-else class="h-4 w-4 mr-2" />{{ saved ? t('common.success') : t('common.save') }}
+              </Button>
+            </div>
+          </div>
+
+          <!-- MiIoT Connection Settings Section -->
+          <div v-show="activeSection === 'ext-miot'" class="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{{ t('settings.atxMiot') }}</CardTitle>
+                <CardDescription>{{ t('settings.atxMiotDesc') }}</CardDescription>
+              </CardHeader>
+              <CardContent class="space-y-4">
+                <div class="space-y-2">
+                  <Label for="miot-did">{{ t('settings.atxMiotDid') }}</Label>
+                  <Input
+                    id="miot-did"
+                    v-model="atxConfig.miot.did"
+                    :placeholder="t('settings.atxMiotDidPlaceholder')"
+                  />
+                  <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotDidHint') }}</p>
+                </div>
+                <div class="space-y-2">
+                  <Label for="miot-command">{{ t('settings.atxMiotCommand') }}</Label>
+                  <Input
+                    id="miot-command"
+                    v-model="atxConfig.miot.command"
+                    :placeholder="t('settings.atxMiotCommandPlaceholder')"
+                  />
+                  <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotCommandHint') }}</p>
+                </div>
+                <div class="space-y-2">
+                  <Label for="miot-auth-path">{{ t('settings.atxMiotAuthPath') }}</Label>
+                  <Input
+                    id="miot-auth-path"
+                    v-model="atxConfig.miot.auth_path"
+                    :placeholder="t('settings.atxMiotAuthPathPlaceholder')"
+                  />
+                  <p class="text-xs text-muted-foreground">{{ t('settings.atxMiotAuthPathHint') }}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <!-- Save button -->
+            <div class="flex justify-end">
+              <Button :disabled="loading" @click="saveAtxConfig">
                 <Check v-if="saved" class="h-4 w-4 mr-2" /><Save v-else class="h-4 w-4 mr-2" />{{ saved ? t('common.success') : t('common.save') }}
               </Button>
             </div>

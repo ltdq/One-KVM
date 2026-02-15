@@ -118,6 +118,8 @@ export enum AtxDriverType {
 	Gpio = "gpio",
 	/** USB HID relay module */
 	UsbRelay = "usbrelay",
+	/** MiIoT smart plug (开机卡) */
+	Miot = "miot",
 	/** Disabled / Not configured */
 	None = "none",
 }
@@ -135,7 +137,7 @@ export enum ActiveLevel {
  * This is the "four-tuple" configuration: (driver, device, pin/channel, level)
  */
 export interface AtxKeyConfig {
-	/** Driver type (GPIO or USB Relay) */
+	/** Driver type (GPIO, USB Relay, or MiIoT) */
 	driver: AtxDriverType;
 	/**
 	 * Device path:
@@ -151,18 +153,42 @@ export interface AtxKeyConfig {
 	pin: number;
 	/** Active level (only applicable to GPIO, ignored for USB Relay) */
 	active_level: ActiveLevel;
+	/** MiIoT property name for power-on / action (driver=miot) */
+	prop: string;
+	/** MiIoT property value for power-on / action (driver=miot) */
+	value: string;
+	/** MiIoT property name for force-off (power key, driver=miot) */
+	off_prop: string;
+	/** MiIoT property value for force-off (power key, driver=miot) */
+	off_value: string;
 }
 
-/** LED sensing configuration (optional) */
-export interface AtxLedConfig {
-	/** Whether LED sensing is enabled */
-	enabled: boolean;
-	/** GPIO chip for LED sensing */
+/** Driver type for ATX status detection */
+export enum AtxStatusDriverType {
+	/** Disabled / Not configured */
+	None = "none",
+	/** LED sensing via GPIO */
+	Led = "led",
+	/** MiIoT smart plug status query */
+	Miot = "miot",
+}
+
+/** Status detection configuration */
+export interface AtxStatusConfig {
+	/** Status detection driver */
+	driver: AtxStatusDriverType;
+	/** GPIO chip for LED sensing (driver=Led) */
 	gpio_chip: string;
-	/** GPIO pin for LED input */
+	/** GPIO pin for LED input (driver=Led) */
 	gpio_pin: number;
-	/** Whether LED is active low (inverted logic) */
+	/** Whether LED is active low / inverted logic (driver=Led) */
 	inverted: boolean;
+	/** MiIoT property to read for status (driver=Miot) */
+	prop: string;
+	/** Value that means "power on" (driver=Miot) */
+	on_value: string;
+	/** Value that means "power off" (driver=Miot) */
+	off_value: string;
 }
 
 /**
@@ -171,15 +197,27 @@ export interface AtxLedConfig {
  * Each ATX action (power, reset) can be independently configured with its own
  * hardware binding using the four-tuple: (driver, device, pin, active_level).
  */
+/** MiIoT smart plug connection settings */
+export interface MiotConfig {
+	/** Device ID (DID) for the MiIoT device */
+	did: string;
+	/** Path to mijiaAPI command (default: "mijiaAPI") */
+	command: string;
+	/** Path to auth/token file for mijiaAPI (optional) */
+	auth_path: string;
+}
+
 export interface AtxConfig {
 	/** Enable ATX functionality */
 	enabled: boolean;
-	/** Power button configuration (used for both short and long press) */
+	/** Power button configuration (short press prop/value, long press off_prop/off_value) */
 	power: AtxKeyConfig;
 	/** Reset button configuration */
 	reset: AtxKeyConfig;
-	/** LED sensing configuration (optional) */
-	led: AtxLedConfig;
+	/** Status detection configuration (LED GPIO or MiIoT) */
+	status: AtxStatusConfig;
+	/** MiIoT connection settings (shared by all MiIoT components) */
+	miot: MiotConfig;
 	/** Network interface for WOL packets (empty = auto) */
 	wol_interface: string;
 }
@@ -233,7 +271,7 @@ export enum EncoderType {
  * Simplifies bitrate configuration by providing three intuitive presets
  * plus a custom option for advanced users.
  */
-export type BitratePreset = 
+export type BitratePreset =
 	/**
 	 * Speed priority: 1 Mbps, lowest latency, smaller GOP
 	 * Best for: slow networks, remote management, low-bandwidth scenarios
@@ -389,14 +427,38 @@ export interface AtxKeyConfigUpdate {
 	device?: string;
 	pin?: number;
 	active_level?: ActiveLevel;
+	/** MiIoT property name for power-on / action (driver=miot) */
+	prop?: string;
+	/** MiIoT property value for power-on / action (driver=miot) */
+	value?: string;
+	/** MiIoT property name for force-off (power key, driver=miot) */
+	off_prop?: string;
+	/** MiIoT property value for force-off (power key, driver=miot) */
+	off_value?: string;
 }
 
-/** Update for LED sensing configuration */
-export interface AtxLedConfigUpdate {
-	enabled?: boolean;
+/** Update for status detection configuration */
+export interface AtxStatusConfigUpdate {
+	driver?: AtxStatusDriverType;
 	gpio_chip?: string;
 	gpio_pin?: number;
 	inverted?: boolean;
+	/** MiIoT property to read for status */
+	prop?: string;
+	/** Value that means "power on" */
+	on_value?: string;
+	/** Value that means "power off" */
+	off_value?: string;
+}
+
+/** Update for MiIoT connection settings */
+export interface MiotConfigUpdate {
+	/** Device ID (DID) for the MiIoT device */
+	did?: string;
+	/** Path to mijiaAPI command */
+	command?: string;
+	/** Path to auth/token file for mijiaAPI */
+	auth_path?: string;
 }
 
 /** ATX configuration update request */
@@ -406,8 +468,10 @@ export interface AtxConfigUpdate {
 	power?: AtxKeyConfigUpdate;
 	/** Reset button configuration */
 	reset?: AtxKeyConfigUpdate;
-	/** LED sensing configuration */
-	led?: AtxLedConfigUpdate;
+	/** Status detection configuration */
+	status?: AtxStatusConfigUpdate;
+	/** MiIoT connection settings */
+	miot?: MiotConfigUpdate;
 	/** Network interface for WOL packets (empty = auto) */
 	wol_interface?: string;
 }
@@ -440,21 +504,25 @@ export interface EasytierConfigUpdate {
 }
 
 /** Extension running status */
-export type ExtensionStatus = 
+export type ExtensionStatus =
 	/** Binary not found at expected path */
 	| { state: "unavailable", data?: undefined }
 	/** Extension is stopped */
 	| { state: "stopped", data?: undefined }
 	/** Extension is running */
-	| { state: "running", data: {
-	/** Process ID */
-	pid: number;
-}}
+	| {
+		state: "running", data: {
+			/** Process ID */
+			pid: number;
+		}
+	}
 	/** Extension failed to start */
-	| { state: "failed", data: {
-	/** Error message */
-	error: string;
-}};
+	| {
+		state: "failed", data: {
+			/** Error message */
+			error: string;
+		}
+	};
 
 /** easytier extension info */
 export interface EasytierInfo {

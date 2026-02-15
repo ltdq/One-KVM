@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useSystemStore } from '@/stores/system'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -28,11 +29,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const systemStore = useSystemStore()
 
 const activeTab = ref('atx')
 
-// ATX state
-const powerState = ref<'on' | 'off' | 'unknown'>('unknown')
+// ATX state from store
+const powerState = computed(() => systemStore.atx?.powerStatus ?? 'unknown')
 const confirmAction = ref<'short' | 'long' | 'reset' | null>(null)
 
 // WOL state
@@ -132,6 +134,11 @@ if (savedHistory) {
     wolHistory.value = []
   }
 }
+
+// Fetch ATX state on mount
+onMounted(() => {
+  systemStore.fetchAtxState().catch(() => {})
+})
 </script>
 
 <template>
@@ -247,14 +254,14 @@ if (savedHistory) {
   </div>
 
   <!-- Confirm Dialog -->
-  <AlertDialog :open="!!confirmAction" @update:open="confirmAction = null">
+  <AlertDialog :open="!!confirmAction">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>{{ confirmTitle }}</AlertDialogTitle>
         <AlertDialogDescription>{{ confirmDescription }}</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
+        <AlertDialogCancel @click="confirmAction = null">{{ t('common.cancel') }}</AlertDialogCancel>
         <AlertDialogAction @click="handleAction">{{ t('common.confirm') }}</AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>

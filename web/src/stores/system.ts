@@ -41,7 +41,7 @@ interface AtxState {
   available: boolean
   backend: string
   initialized: boolean
-  powerOn: boolean
+  powerStatus: 'on' | 'off' | 'unknown'
   error: string | null
 }
 
@@ -200,7 +200,7 @@ export const useSystemStore = defineStore('system', () => {
         available: state.available,
         backend: state.backend,
         initialized: state.initialized,
-        powerOn: state.power_status === 'on',
+        powerStatus: state.power_status as 'on' | 'off' | 'unknown',
         error: null,
       }
       return state
@@ -308,7 +308,7 @@ export const useSystemStore = defineStore('system', () => {
         available: data.atx.available,
         backend: data.atx.backend,
         initialized: data.atx.initialized,
-        powerOn: data.atx.power_on,
+        powerStatus: data.atx.power_on ? 'on' : 'off',
         error: data.atx.error,
       }
     } else {

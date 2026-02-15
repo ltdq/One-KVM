@@ -72,7 +72,7 @@ impl AtxKeyExecutor {
         match self.config.driver {
             AtxDriverType::Gpio => self.init_gpio().await?,
             AtxDriverType::UsbRelay => self.init_usb_relay().await?,
-            AtxDriverType::None => {}
+            AtxDriverType::None | AtxDriverType::Miot => {}
         }
 
         self.initialized.store(true, Ordering::Relaxed);
@@ -147,7 +147,7 @@ impl AtxKeyExecutor {
         match self.config.driver {
             AtxDriverType::Gpio => self.pulse_gpio(duration).await,
             AtxDriverType::UsbRelay => self.pulse_usb_relay(duration).await,
-            AtxDriverType::None => Ok(()),
+            AtxDriverType::None | AtxDriverType::Miot => Ok(()),
         }
     }
 
@@ -237,7 +237,7 @@ impl AtxKeyExecutor {
                 // Release USB relay handle
                 *self.usb_relay_handle.lock().unwrap() = None;
             }
-            AtxDriverType::None => {}
+            AtxDriverType::None | AtxDriverType::Miot => {}
         }
 
         self.initialized.store(false, Ordering::Relaxed);

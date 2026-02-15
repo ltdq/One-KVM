@@ -8,7 +8,8 @@ use tracing::{debug, info, warn};
 
 use super::executor::{timing, AtxKeyExecutor};
 use super::led::LedSensor;
-use super::types::{AtxKeyConfig, AtxLedConfig, AtxState, PowerStatus};
+use super::miot::MiotBackend;
+use super::types::{AtxDriverType, AtxKeyConfig, AtxStatusConfig, AtxStatusDriverType, MiotConfig, AtxState, PowerStatus};
 use crate::error::{AppError, Result};
 
 /// ATX power control configuration
@@ -20,8 +21,10 @@ pub struct AtxControllerConfig {
     pub power: AtxKeyConfig,
     /// Reset button configuration
     pub reset: AtxKeyConfig,
-    /// LED sensing configuration
-    pub led: AtxLedConfig,
+    /// Status detection configuration
+    pub status: AtxStatusConfig,
+    /// MiIoT connection settings (shared by all keys using driver=Miot)
+    pub miot: MiotConfig,
 }
 
 impl Default for AtxControllerConfig {
@@ -30,9 +33,17 @@ impl Default for AtxControllerConfig {
             enabled: false,
             power: AtxKeyConfig::default(),
             reset: AtxKeyConfig::default(),
-            led: AtxLedConfig::default(),
+            status: AtxStatusConfig::default(),
+            miot: MiotConfig::default(),
         }
     }
+}
+
+/// Check if any component uses the MiIoT backend
+fn needs_miot_backend(config: &AtxControllerConfig) -> bool {
+    config.power.driver == AtxDriverType::Miot
+        || config.reset.driver == AtxDriverType::Miot
+        || config.status.driver == AtxStatusDriverType::Miot
 }
 
 /// Internal state holding all ATX components
@@ -42,6 +53,8 @@ struct AtxInner {
     power_executor: Option<AtxKeyExecutor>,
     reset_executor: Option<AtxKeyExecutor>,
     led_sensor: Option<LedSensor>,
+    /// MiIoT backend (shared by components using driver=Miot)
+    miot_backend: Option<MiotBackend>,
 }
 
 /// ATX Controller
@@ -62,6 +75,7 @@ impl AtxController {
                 power_executor: None,
                 reset_executor: None,
                 led_sensor: None,
+                miot_backend: None,
             }),
         }
     }
@@ -82,8 +96,24 @@ impl AtxController {
 
         info!("Initializing ATX controller");
 
-        // Initialize power executor
-        if inner.config.power.is_configured() {
+        // Initialize MiIoT backend if any component uses it
+        if needs_miot_backend(&inner.config) {
+            if inner.config.miot.is_configured() {
+                info!("ATX using MiIoT backend for device {}", inner.config.miot.did);
+                let backend = MiotBackend::new(inner.config.miot.clone());
+                if let Err(e) = backend.init().await {
+                    warn!("Failed to initialize MiIoT backend: {}", e);
+                } else {
+                    info!("MiIoT backend initialized successfully");
+                    inner.miot_backend = Some(backend);
+                }
+            } else {
+                warn!("Component(s) configured with MiIoT driver but MiIoT connection (DID) not set");
+            }
+        }
+
+        // Initialize power executor (GPIO/USB relay only)
+        if inner.config.power.driver != AtxDriverType::Miot && inner.config.power.is_configured() {
             let mut executor = AtxKeyExecutor::new(inner.config.power.clone());
             if let Err(e) = executor.init().await {
                 warn!("Failed to initialize power executor: {}", e);
@@ -96,8 +126,8 @@ impl AtxController {
             }
         }
 
-        // Initialize reset executor
-        if inner.config.reset.is_configured() {
+        // Initialize reset executor (GPIO/USB relay only)
+        if inner.config.reset.driver != AtxDriverType::Miot && inner.config.reset.is_configured() {
             let mut executor = AtxKeyExecutor::new(inner.config.reset.clone());
             if let Err(e) = executor.init().await {
                 warn!("Failed to initialize reset executor: {}", e);
@@ -110,15 +140,21 @@ impl AtxController {
             }
         }
 
-        // Initialize LED sensor
-        if inner.config.led.is_configured() {
-            let mut sensor = LedSensor::new(inner.config.led.clone());
+        // Initialize LED sensor (only if status driver is Led)
+        if inner.config.status.driver == AtxStatusDriverType::Led && inner.config.status.is_configured() {
+            let led_config = super::types::AtxLedConfig {
+                enabled: true,
+                gpio_chip: inner.config.status.gpio_chip.clone(),
+                gpio_pin: inner.config.status.gpio_pin,
+                inverted: inner.config.status.inverted,
+            };
+            let mut sensor = LedSensor::new(led_config);
             if let Err(e) = sensor.init().await {
                 warn!("Failed to initialize LED sensor: {}", e);
             } else {
                 info!(
                     "LED sensor initialized on {} pin {}",
-                    inner.config.led.gpio_chip, inner.config.led.gpio_pin
+                    inner.config.status.gpio_chip, inner.config.status.gpio_pin
                 );
                 inner.led_sensor = Some(sensor);
             }
@@ -154,30 +190,27 @@ impl AtxController {
     pub async fn state(&self) -> AtxState {
         let inner = self.inner.read().await;
 
-        let power_status = if let Some(sensor) = inner.led_sensor.as_ref() {
-            sensor.read().await.unwrap_or(PowerStatus::Unknown)
-        } else {
-            PowerStatus::Unknown
+        let power_status = self.get_power_status_inner(&inner).await;
+
+        let power_configured = inner.config.power.is_configured()
+            && (inner.config.power.driver != AtxDriverType::Miot
+                || inner.miot_backend.is_some());
+        let reset_configured = inner.config.reset.is_configured()
+            && (inner.config.reset.driver != AtxDriverType::Miot
+                || inner.miot_backend.is_some());
+
+        let status_supported = match inner.config.status.driver {
+            AtxStatusDriverType::Led => inner.led_sensor.as_ref().map(|s| s.is_initialized()).unwrap_or(false),
+            AtxStatusDriverType::Miot => inner.miot_backend.is_some(),
+            AtxStatusDriverType::None => false,
         };
 
         AtxState {
             available: inner.config.enabled,
-            power_configured: inner
-                .power_executor
-                .as_ref()
-                .map(|e| e.is_initialized())
-                .unwrap_or(false),
-            reset_configured: inner
-                .reset_executor
-                .as_ref()
-                .map(|e| e.is_initialized())
-                .unwrap_or(false),
+            power_configured,
+            reset_configured,
             power_status,
-            led_supported: inner
-                .led_sensor
-                .as_ref()
-                .map(|s| s.is_initialized())
-                .unwrap_or(false),
+            status_supported,
         }
     }
 
@@ -218,6 +251,22 @@ impl AtxController {
     /// Short press power button (turn on or graceful shutdown)
     pub async fn power_short(&self) -> Result<()> {
         let inner = self.inner.read().await;
+
+        // MiIoT driver: determine value based on current power status
+        if inner.config.power.driver == AtxDriverType::Miot {
+            let miot = inner.miot_backend.as_ref()
+                .ok_or_else(|| AppError::Internal("MiIoT backend not initialized".to_string()))?;
+
+            let current_status = self.get_power_status_inner(&inner).await;
+            let (prop, value) = match current_status {
+                PowerStatus::On => (&inner.config.power.off_prop, &inner.config.power.off_value),
+                PowerStatus::Off | PowerStatus::Unknown => (&inner.config.power.prop, &inner.config.power.value),
+            };
+            info!("ATX MiIoT: Short press power (status={:?}, set {}={})", current_status, prop, value);
+            return miot.set_prop(prop, value).await;
+        }
+
+        // GPIO/USB relay: pulse power pin
         let executor = inner
             .power_executor
             .as_ref()
@@ -230,9 +279,21 @@ impl AtxController {
         executor.pulse(timing::SHORT_PRESS).await
     }
 
-    /// Long press power button (force power off)
+    /// Long press power button (sends off_prop=off_value for MiIoT)
     pub async fn power_long(&self) -> Result<()> {
         let inner = self.inner.read().await;
+
+        // MiIoT driver: send configured off_prop=off_value
+        if inner.config.power.driver == AtxDriverType::Miot {
+            let miot = inner.miot_backend.as_ref()
+                .ok_or_else(|| AppError::Internal("MiIoT backend not initialized".to_string()))?;
+            let prop = &inner.config.power.off_prop;
+            let value = &inner.config.power.off_value;
+            info!("ATX MiIoT: Force power off (set {}={})", prop, value);
+            return miot.set_prop(prop, value).await;
+        }
+
+        // GPIO/USB relay: long pulse power pin
         let executor = inner
             .power_executor
             .as_ref()
@@ -248,6 +309,18 @@ impl AtxController {
     /// Press reset button
     pub async fn reset(&self) -> Result<()> {
         let inner = self.inner.read().await;
+
+        // MiIoT driver: send configured prop=value
+        if inner.config.reset.driver == AtxDriverType::Miot {
+            let miot = inner.miot_backend.as_ref()
+                .ok_or_else(|| AppError::Internal("MiIoT backend not initialized".to_string()))?;
+            let prop = &inner.config.reset.prop;
+            let value = &inner.config.reset.value;
+            info!("ATX MiIoT: Reset (set {}={})", prop, value);
+            return miot.set_prop(prop, value).await;
+        }
+
+        // GPIO/USB relay: pulse reset pin
         let executor = inner
             .reset_executor
             .as_ref()
@@ -260,13 +333,32 @@ impl AtxController {
         executor.pulse(timing::RESET_PRESS).await
     }
 
-    /// Get current power status from LED sensor
+    /// Get current power status from status detection (internal helper, caller holds read lock)
+    async fn get_power_status_inner(&self, inner: &AtxInner) -> PowerStatus {
+        match inner.config.status.driver {
+            AtxStatusDriverType::Miot => {
+                if let Some(miot) = inner.miot_backend.as_ref() {
+                    miot.get_power_status(&inner.config.status.prop, &inner.config.status.on_value)
+                        .await
+                        .unwrap_or(PowerStatus::Unknown)
+                } else {
+                    PowerStatus::Unknown
+                }
+            }
+            AtxStatusDriverType::Led => {
+                match inner.led_sensor.as_ref() {
+                    Some(sensor) => sensor.read().await.unwrap_or(PowerStatus::Unknown),
+                    None => PowerStatus::Unknown,
+                }
+            }
+            AtxStatusDriverType::None => PowerStatus::Unknown,
+        }
+    }
+
+    /// Get current power status from status detection
     pub async fn power_status(&self) -> Result<PowerStatus> {
         let inner = self.inner.read().await;
-        match inner.led_sensor.as_ref() {
-            Some(sensor) => sensor.read().await,
-            None => Ok(PowerStatus::Unknown),
-        }
+        Ok(self.get_power_status_inner(&inner).await)
     }
 
     /// Shutdown the ATX controller
@@ -280,6 +372,11 @@ impl AtxController {
     /// Internal shutdown helper
     async fn shutdown_internal(&self) -> Result<()> {
         let mut inner = self.inner.write().await;
+
+        // Shutdown MiIoT backend
+        if let Some(mut backend) = inner.miot_backend.take() {
+            backend.shutdown().await.ok();
+        }
 
         // Shutdown power executor
         if let Some(mut executor) = inner.power_executor.take() {
@@ -316,7 +413,7 @@ mod tests {
         assert!(!config.enabled);
         assert!(!config.power.is_configured());
         assert!(!config.reset.is_configured());
-        assert!(!config.led.is_configured());
+        assert!(!config.status.is_configured());
     }
 
     #[test]

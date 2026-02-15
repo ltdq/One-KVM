@@ -398,16 +398,42 @@ pub struct AtxKeyConfigUpdate {
     pub device: Option<String>,
     pub pin: Option<u32>,
     pub active_level: Option<crate::atx::ActiveLevel>,
+    /// MiIoT property name for power-on / action (driver=miot)
+    pub prop: Option<String>,
+    /// MiIoT property value for power-on / action (driver=miot)
+    pub value: Option<String>,
+    /// MiIoT property name for force-off (power key, driver=miot)
+    pub off_prop: Option<String>,
+    /// MiIoT property value for force-off (power key, driver=miot)
+    pub off_value: Option<String>,
 }
 
-/// Update for LED sensing configuration
+/// Update for status detection configuration
 #[typeshare]
 #[derive(Debug, Deserialize)]
-pub struct AtxLedConfigUpdate {
-    pub enabled: Option<bool>,
+pub struct AtxStatusConfigUpdate {
+    pub driver: Option<crate::atx::AtxStatusDriverType>,
     pub gpio_chip: Option<String>,
     pub gpio_pin: Option<u32>,
     pub inverted: Option<bool>,
+    /// MiIoT property to read for status
+    pub prop: Option<String>,
+    /// Value that means "power on"
+    pub on_value: Option<String>,
+    /// Value that means "power off"
+    pub off_value: Option<String>,
+}
+
+/// Update for MiIoT connection settings
+#[typeshare]
+#[derive(Debug, Deserialize)]
+pub struct MiotConfigUpdate {
+    /// Device ID (DID) for the MiIoT device
+    pub did: Option<String>,
+    /// Path to mijiaAPI command
+    pub command: Option<String>,
+    /// Path to auth/token file for mijiaAPI
+    pub auth_path: Option<String>,
 }
 
 /// ATX configuration update request
@@ -419,8 +445,10 @@ pub struct AtxConfigUpdate {
     pub power: Option<AtxKeyConfigUpdate>,
     /// Reset button configuration
     pub reset: Option<AtxKeyConfigUpdate>,
-    /// LED sensing configuration
-    pub led: Option<AtxLedConfigUpdate>,
+    /// Status detection configuration
+    pub status: Option<AtxStatusConfigUpdate>,
+    /// MiIoT connection settings
+    pub miot: Option<MiotConfigUpdate>,
     /// Network interface for WOL packets (empty = auto)
     pub wol_interface: Option<String>,
 }
@@ -460,8 +488,11 @@ impl AtxConfigUpdate {
         if let Some(ref reset) = self.reset {
             Self::apply_key_update(reset, &mut config.reset);
         }
-        if let Some(ref led) = self.led {
-            Self::apply_led_update(led, &mut config.led);
+        if let Some(ref status) = self.status {
+            Self::apply_status_update(status, &mut config.status);
+        }
+        if let Some(ref miot) = self.miot {
+            Self::apply_miot_update(miot, &mut config.miot);
         }
         if let Some(ref wol_interface) = self.wol_interface {
             config.wol_interface = wol_interface.clone();
@@ -481,11 +512,23 @@ impl AtxConfigUpdate {
         if let Some(level) = update.active_level {
             config.active_level = level;
         }
+        if let Some(ref prop) = update.prop {
+            config.prop = prop.clone();
+        }
+        if let Some(ref value) = update.value {
+            config.value = value.clone();
+        }
+        if let Some(ref off_prop) = update.off_prop {
+            config.off_prop = off_prop.clone();
+        }
+        if let Some(ref off_value) = update.off_value {
+            config.off_value = off_value.clone();
+        }
     }
 
-    fn apply_led_update(update: &AtxLedConfigUpdate, config: &mut crate::atx::AtxLedConfig) {
-        if let Some(enabled) = update.enabled {
-            config.enabled = enabled;
+    fn apply_status_update(update: &AtxStatusConfigUpdate, config: &mut crate::atx::AtxStatusConfig) {
+        if let Some(driver) = update.driver {
+            config.driver = driver;
         }
         if let Some(ref chip) = update.gpio_chip {
             config.gpio_chip = chip.clone();
@@ -495,6 +538,27 @@ impl AtxConfigUpdate {
         }
         if let Some(inverted) = update.inverted {
             config.inverted = inverted;
+        }
+        if let Some(ref prop) = update.prop {
+            config.prop = prop.clone();
+        }
+        if let Some(ref on_value) = update.on_value {
+            config.on_value = on_value.clone();
+        }
+        if let Some(ref off_value) = update.off_value {
+            config.off_value = off_value.clone();
+        }
+    }
+
+    fn apply_miot_update(update: &MiotConfigUpdate, config: &mut crate::atx::MiotConfig) {
+        if let Some(ref did) = update.did {
+            config.did = did.clone();
+        }
+        if let Some(ref command) = update.command {
+            config.command = command.clone();
+        }
+        if let Some(ref auth_path) = update.auth_path {
+            config.auth_path = auth_path.clone();
         }
     }
 }

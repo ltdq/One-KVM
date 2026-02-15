@@ -1313,8 +1313,8 @@ async function handlePowerShort() {
   try {
     await atxApi.power('short')
     await systemStore.fetchAtxState()
-  } catch {
-    // ATX action failed
+  } catch (e: any) {
+    toast.error(e?.message || 'ATX power short failed')
   }
 }
 
@@ -1322,8 +1322,8 @@ async function handlePowerLong() {
   try {
     await atxApi.power('long')
     await systemStore.fetchAtxState()
-  } catch {
-    // ATX action failed
+  } catch (e: any) {
+    toast.error(e?.message || 'ATX power long failed')
   }
 }
 
@@ -1331,8 +1331,8 @@ async function handleReset() {
   try {
     await atxApi.power('reset')
     await systemStore.fetchAtxState()
-  } catch {
-    // ATX action failed
+  } catch (e: any) {
+    toast.error(e?.message || 'ATX reset failed')
   }
 }
 

@@ -351,24 +351,28 @@ impl MsdConfig {
 }
 
 // Re-export ATX types from atx module for configuration
-pub use crate::atx::{ActiveLevel, AtxDriverType, AtxKeyConfig, AtxLedConfig};
+pub use crate::atx::{ActiveLevel, AtxDriverType, AtxKeyConfig, AtxStatusConfig, AtxStatusDriverType, MiotConfig};
 
 /// ATX power control configuration
 ///
 /// Each ATX action (power, reset) can be independently configured with its own
-/// hardware binding using the four-tuple: (driver, device, pin, active_level).
+/// hardware binding. For GPIO/USB relay: (driver, device, pin, active_level).
+/// For MiIoT: (driver=miot, prop, value) + global MiIoT connection settings.
+/// Status detection can use LED GPIO or MiIoT independently of button drivers.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AtxConfig {
     /// Enable ATX functionality
     pub enabled: bool,
-    /// Power button configuration (used for both short and long press)
+    /// Power button configuration (short press prop/value, long press off_prop/off_value)
     pub power: AtxKeyConfig,
     /// Reset button configuration
     pub reset: AtxKeyConfig,
-    /// LED sensing configuration (optional)
-    pub led: AtxLedConfig,
+    /// Status detection configuration (LED GPIO or MiIoT)
+    pub status: AtxStatusConfig,
+    /// MiIoT connection settings (DID + command path, shared by all MiIoT components)
+    pub miot: MiotConfig,
     /// Network interface for WOL packets (empty = auto)
     pub wol_interface: String,
 }
@@ -379,7 +383,8 @@ impl Default for AtxConfig {
             enabled: false,
             power: AtxKeyConfig::default(),
             reset: AtxKeyConfig::default(),
-            led: AtxLedConfig::default(),
+            status: AtxStatusConfig::default(),
+            miot: MiotConfig::default(),
             wol_interface: String::new(),
         }
     }
@@ -392,7 +397,8 @@ impl AtxConfig {
             enabled: self.enabled,
             power: self.power.clone(),
             reset: self.reset.clone(),
-            led: self.led.clone(),
+            status: self.status.clone(),
+            miot: self.miot.clone(),
         }
     }
 }
